@@ -9,9 +9,9 @@ export class Vec2
     // Static methods ----------------------------------------------------------
 
     /// Component-wise initialization.
-    public static of(x: number, y: number): Vec2
+    public static of(x: number, y?: number): Vec2
     {
-        return new Vec2(x, y);
+        return new Vec2(x, y ?? x);
     }
 
     /// A Vec2 with x and y set to 0.
@@ -21,7 +21,7 @@ export class Vec2
     }
 
     /// A Vec2 with x and y set to n.
-    public static all(n: number): Vec2
+    public static all(n: number): Vec2 // Deprecated in favor of Vec2.of(n)
     {
         return new Vec2(n, n);
     }

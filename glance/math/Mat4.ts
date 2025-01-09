@@ -344,6 +344,17 @@ export class Mat4
             1);
     }
 
+    /// A Mat4 that is the transpose of another.
+    public static transposeOf(other: Mat4): Mat4
+    {
+        return new Mat4(
+            other.a, other.e, other.i, other.m,
+            other.b, other.f, other.j, other.n,
+            other.c, other.g, other.k, other.o,
+            other.d, other.h, other.l, other.p,
+        );
+    }
+
     /// A Mat4 that is the inverse of another.
     public static inverseOf(m: Mat4): Mat4 | null
     {
@@ -877,6 +888,26 @@ export class Mat4
         this.o = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
         this.p = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
         return this;
+    }
+
+    /// Reinitialize this Matrix as a 3D translation matrix.
+    public fromTranslation(v: Vec3 | number, y?: number, z?: number): Mat4
+    {
+        if (typeof v === 'number') {
+            return this.set(
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                v, y ?? v, z ?? v, 1,
+            );
+        } else {
+            return this.set(
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                v.x, v.y, v.z, 1,
+            );
+        }
     }
 
     /// 3D Translation of this Mat4 by the given Vec3.

@@ -7,6 +7,7 @@
 export * from "./core_patterns.js";
 export * from "./core.js";
 export * from "./assets/geo.js";
+export * from "./assets/hdr.js";
 export * from "./math/index.js";
 export * from "./types.js";
 export * from "./canvas.js";

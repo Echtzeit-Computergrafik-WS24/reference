@@ -12,9 +12,9 @@ export class Vec3
     // Static methods ----------------------------------------------------------
 
     /// Component-wise initialization.
-    public static of(x: number, y: number, z: number): Vec3
+    public static of(x: number, y?: number, z?: number): Vec3
     {
-        return new Vec3(x, y, z);
+        return new Vec3(x, y ?? x, z ?? x);
     }
 
     /// A Vec3 with x, y and z set to 0.
@@ -24,7 +24,7 @@ export class Vec3
     }
 
     /// A Vec3 with x, y and z set to n.
-    public static all(n: number): Vec3
+    public static all(n: number): Vec3 // Deprecated (use Vec3.of(n))
     {
         return new Vec3(n, n, n);
     }
@@ -139,12 +139,20 @@ export class Vec3
     }
 
     /// Normal of a.
-    public static normalOf(a: Vec3): Vec3
+    public static normalOf(x: Vec3 | number, y?: number, z?: number): Vec3
     {
-        const magSq = a.x * a.x + a.y * a.y;
+        if (typeof x !== "number") {
+            z = x.z;
+            y = x.y;
+            x = x.x;
+        } else {
+            y = y ?? x;
+            z = z ?? x;
+        }
+        const magSq = x * x + y * y + z * z;
         if (magSq > 0) {
             const invMag = 1 / Math.sqrt(magSq);
-            return new Vec3(a.x * invMag, a.y * invMag, a.z * invMag);
+            return new Vec3(x * invMag, y * invMag, z * invMag);
         } else {
             return new Vec3(0, 0, 0);
         }

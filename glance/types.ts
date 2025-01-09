@@ -2,6 +2,7 @@ export
 {
     AttachmentType,
     AttributeDataType,
+    BlendEquation,
     BlendFunc,
     BufferUsage,
     CullFace,
@@ -392,6 +393,18 @@ const enum BlendFunc
 }
 
 
+/// Blend function equations.
+/// See https://developer.mozilla.org/en-US/docs/Web/API/WebGLRenderingContext/blendEquation
+const enum BlendEquation
+{
+    FUNC_ADD = 0x8006,              // Adds the source and destination colors (default).
+    FUNC_SUBTRACT = 0x800A,         // Subtracts the destination color from the source color.
+    FUNC_REVERSE_SUBTRACT = 0x800B, // Subtracts the source color from the destination color.
+    MIN = 0x8007,                   // Selects the minimum of the source and destination colors.
+    MAX = 0x8008,                   // Selects the maximum of the source and destination colors.
+}
+
+
 /// Draw modes for drawElements.
 /// https://developer.mozilla.org/en-US/docs/Web/API/WebGLRenderingContext/drawElements#mode
 const enum DrawMode
@@ -764,9 +777,6 @@ type DrawCall = {
     /// The Shader Program to use.
     readonly program: Program,
 
-    /// Texture Unit bindings.
-    readonly textures: ReadonlyMap<TextureUnitId, TextureUnit>,
-
     /// The number of indices to draw.
     indexCount: number,
 
@@ -782,6 +792,9 @@ type DrawCall = {
     /// Uniform overrides.
     uniform: Record<string, UniformValue>,
 
+    /// Textures bound to uniform sampler locations.
+    textures: Record<string, Texture>,
+
     /// The front-/backface culling mode.
     cullFace?: CullFace,
 
@@ -790,6 +803,9 @@ type DrawCall = {
 
     /// The blend function.
     blendFunc?: [BlendFunc, BlendFunc] | [BlendFunc, BlendFunc, BlendFunc, BlendFunc],
+
+    /// The blend equation.
+    blendEquation?: BlendEquation | [BlendEquation, BlendEquation],
 
     /// Whether the draw call should update the depth buffer.
     updateDepthBuffer?: boolean,

@@ -2,15 +2,15 @@
 // Setup
 // =============================================================================
 
-let orbitCenter, orbitPan, orbitTilt, orbitDistance, defaultProjection, alien, desert, camera, television, skybox;
+let orbitCenter, orbitPan, orbitTilt, orbitDistance, alien, desert, camera, television, skybox, projectionXform;
 {
     // Interactivity ///////////////////////////////////////////////////////////
-    
+
     orbitCenter = Vec3.all(0);
     orbitPan = 0;
     orbitTilt = 0;
     orbitDistance = 3;
-    defaultProjection = Mat4.identity()
+    projectionXform = glance.Mat4.perspective(Math.PI / 4, gl.canvas.width / gl.canvas.height, 0.1, 30);
 
     onMouseDrag((e) =>
     {
@@ -34,7 +34,7 @@ let orbitCenter, orbitPan, orbitTilt, orbitDistance, defaultProjection, alien, d
 
     onResize(() =>
     {
-        defaultProjection.perspective(Math.PI / 4, gl.canvas.width / gl.canvas.height, 0.4, 30);
+        projectionXform.perspective(Math.PI / 4, gl.canvas.width / gl.canvas.height, 0.1, 30);
     });
 
     // Scene Setup /////////////////////////////////////////////////////////////
@@ -216,7 +216,7 @@ const screenColorTexture = glance.createTexture(gl, "screen-color",
 
 // Screen Draw Call.
 const screen = glance.createDrawCall(gl, "screen", screenVAO, screenProgram, {
-    textures: { u_texture: screenColorTexture, },
+    textures: { u_texture: screenColorTexture },
     uniforms: { u_modelXform: glance.Mat4.translate(3.75, 0.1, 1.9).rotateY(-0.2) },
     cullFace: gl.BACK,
     depthTest: gl.LESS,
@@ -254,13 +254,13 @@ try {
 
 /// Most of the changing uniforms are the same for all draw calls, so we can
 /// simplify the setup by assigning uniforms & rendering each draw call in a loop.
-function renderScene(viewPos, viewXform, projectionXform)
+function renderScene(viewPos, viewXform)
 {
     for (const drawCall of [television, alien, camera, desert, skybox]) {
         drawCall.uniform.u_viewXform = viewXform;
         drawCall.uniform.u_projectionXform = projectionXform;
         if (drawCall !== skybox) {
-            drawCall.uniform.u_cameraPosition = viewPos;
+            drawCall.uniform.u_viewPosition = viewPos;
         }
         glance.draw(gl, drawCall);
     }
@@ -272,13 +272,12 @@ function renderFramebuffer()
     try {
         gl.bindFramebuffer(gl.FRAMEBUFFER, screenFramebuffer);
         gl.viewport(0, 0, screenBufferSize.width, screenBufferSize.height);
-        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
         const viewPos = glance.Vec3.of(-2.8, 1.46, 0.94);
         const viewXform = glance.Mat4.lookAt(viewPos, glance.Vec3.of(0, 0.85, 0), glance.Vec3.yAxis());
-        const projectionXform = glance.Mat4.perspective(Math.PI / 3, 1, 0.1, 10);
-        renderScene(viewPos, viewXform, projectionXform);
+        renderScene(viewPos, viewXform);
     }
     finally {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -286,6 +285,7 @@ function renderFramebuffer()
     }
 }
 
+/// The main render loop.
 function myRenderLoop({ time, globalTime })
 {
     // Update the item positions (in this case, just the alien)
@@ -301,12 +301,12 @@ function myRenderLoop({ time, globalTime })
     const viewPos = glance.Vec3.translateZ(orbitDistance).rotateX(orbitTilt).rotateY(orbitPan).add(orbitCenter);
     const viewXform = glance.Mat4.lookAt(viewPos, orbitCenter, glance.Vec3.yAxis());
 
-    // Render the scene into the default framebuffer.
-    renderScene(viewPos, viewXform, defaultProjection);
+    // Render the scene again, this in the default framebuffer.
+    renderScene(viewPos, viewXform);
 
     // Also render the screen to the default framebuffer.
     screen.uniform.u_viewXform = viewXform;
-    screen.uniform.u_projectionXform = defaultProjection;
+    screen.uniform.u_projectionXform = projectionXform;
     screen.uniform.u_time = time;
     glance.draw(gl, screen);
 }

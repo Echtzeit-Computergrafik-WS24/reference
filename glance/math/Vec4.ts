@@ -12,9 +12,9 @@ export class Vec4
     // Static methods ----------------------------------------------------------
 
     /// Component-wise initialization.
-    public static of(x: number, y: number, z: number, w: number = 1): Vec4
+    public static of(x: number, y?: number, z?: number, w?: number): Vec4
     {
-        return new Vec4(x, y, z, w);
+        return new Vec4(x, y ?? x, z ?? x, w ?? 1);
     }
 
     /// A Vec4 with x, y and z set to 0.
@@ -24,7 +24,7 @@ export class Vec4
     }
 
     /// A Vec4 with x, y, z and w set to n.
-    public static all(n: number): Vec4
+    public static all(n: number): Vec4 // Deprecated use Vec4.of(n) instead
     {
         return new Vec4(n, n, n, n);
     }

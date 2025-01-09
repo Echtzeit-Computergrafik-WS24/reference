@@ -36,6 +36,7 @@ import
 {
     AttachmentType,
     AttributeDataType,
+    BlendEquation,
     BlendFunc,
     BufferUsage,
     CullFace,
@@ -153,6 +154,12 @@ function getContext(canvas: string | HTMLCanvasElement, options: {
     if (gl.getExtension('EXT_color_buffer_float') === null) {
         logWarning(() => `Extension 'EXT_color_buffer_float' is not supported.`);
     }
+    if (gl.getExtension('OES_texture_float_linear') === null) {
+        logWarning(() => `Extension 'OES_texture_float_linear' is not supported.`);
+    }
+    if (gl.getExtension('EXT_float_blend') === null) {
+        logWarning(() => `Extension 'EXT_float_blend' is not supported.`);
+    }
     if (gl.getExtension('EXT_texture_filter_anisotropic') === null) {
         logWarning(() => `Extension 'EXT_texture_filter_anisotropic' is not supported.`);
     }
@@ -252,7 +259,7 @@ function createProgram(
     name: string,
     vertex: VertexShader | string,
     fragment: FragmentShader | string,
-    uniforms?: Record<string, UniformValue>
+    uniforms?: Record<string, UniformValue>,
 ): Program
 {
     // TODO: support asynchronous building of programs if the shaders are not yet compiled
@@ -264,6 +271,12 @@ function createProgram(
     const cached = gl.__glance.programs.get(programSource);
     if (cached) {
         cached.generation = gl.__glance.generation;
+
+        // Update the uniforms if provided.
+        if (uniforms !== undefined) {
+            updateUniforms(gl, cached.object, uniforms);
+        }
+
         logInfo(() => `Reusing cached program "${name}"`);
         return cached.object;
     }
@@ -672,14 +685,19 @@ function createVertexArrayObject(
         ibo = createIndexBuffer(gl, `${shortName}-ibo`, ibo);
     }
 
-    // If the `attributeBufers` parameter is simply a description of a default
-    // attribute buffer, create it.
-    if (!Array.isArray(attributeBuffers) && !attributeBuffers.hasOwnProperty('glo')) {
-        attributeBuffers = createAttributeBuffer(gl, `${shortName}-abo`, attributeBuffers as any);
-    }
+    if (Array.isArray(attributeBuffers)) {
+        // Check that there is at least one attribute buffer
+        if (attributeBuffers.length === 0) {
+            throwError(() => `Need at least one Attribute Buffer for VAO "${name}"`);
+        }
+    } else {
+        // If the `attributeBufers` parameter is simply a description of a
+        // default attribute buffer, create it.
+        if (!attributeBuffers.hasOwnProperty('glo')) {
+            attributeBuffers = createAttributeBuffer(gl, `${shortName}-abo`, attributeBuffers as any);
+        }
 
-    // Normalize the attribute buffers array.
-    if (!Array.isArray(attributeBuffers)) {
+        // Normalize the attribute buffers argument to an array.
         attributeBuffers = [attributeBuffers as any];
     }
 
@@ -820,7 +838,7 @@ function createVertexArrayObject(
 /// - `target`:  The texture target, defaults to `TEXTURE_2D`.
 /// - `depth`: The depth of the texture, defaults to `null` for 2D and cubemap textures.
 /// - `levels`: The number of mipmap levels to create. Defaults to the maximum possible number of levels.
-/// - `useAnisotropy`: Whether to enable anisotropic filtering. Defaults to `false`.
+/// - `useAnisotropy`: Whether to enable anisotropic filtering. Defaults to `true` iff levels > 1.
 /// - `wipTextureUnit`: The texture unit to use for the WIP texture. Defaults to the highest texture unit available.
 /// - `internalFormat`: The internal format of the texture. Defaults to `RGBA8`.
 /// - `filter`: The texture (min/mag) filter(s) to use. Defaults to (tri-)linear filtering.
@@ -1021,13 +1039,15 @@ function createTexture(
         }
 
         // Enable anisotropic filtering if supported and requested.
-        if (options.useAnisotropy) {
+        if (options.useAnisotropy || (options.useAnisotropy === undefined && levels > 1)) {
             const anisotropyExtension = gl.getExtension("EXT_texture_filter_anisotropic");
             if (!anisotropyExtension) {
-                logWarning(() => 'Anisotropic filtering is not supported.');
+                if (options.useAnisotropy) {
+                    logWarning(() => 'Anisotropic filtering is not supported.');
+                }
             }
             else {
-                gl.texParameterf(gl.TEXTURE_2D, anisotropyExtension.TEXTURE_MAX_ANISOTROPY_EXT,
+                gl.texParameterf(target, anisotropyExtension.TEXTURE_MAX_ANISOTROPY_EXT,
                     gl.getParameter(anisotropyExtension.MAX_TEXTURE_MAX_ANISOTROPY_EXT));
             }
         }
@@ -1060,7 +1080,6 @@ function createTexture(
         gl.bindTexture(target, null);
         gl.activeTexture(gl.TEXTURE0);
     }
-
 }
 
 
@@ -1218,6 +1237,9 @@ function createRenderbuffer(
     // Validate the parameters.
     if (width < 1 || height < 1 || !Number.isSafeInteger(width) || !Number.isSafeInteger(height)) {
         throwError(() => `Invalid renderbuffer dimensions: ${width}x${height} of renderbuffer "${name}".`);
+    }
+    if (internalFormat === undefined) {
+        throwError(() => `Missing internal format for renderbuffer "${name}".`);
     }
     // Check that the dimensions are less than or equal to the value of GL_MAX_RENDERBUFFER_SIZE
     // See https://registry.khronos.org/OpenGL-Refpages/es3.0/html/glRenderbufferStorageMultisample.xhtml
@@ -1569,7 +1591,7 @@ function updateFramebufferLayer(
 /// Create a new draw call.
 /// @param gl The WebGL context.
 /// @param name The name of the draw call.
-/// @param vao The VAO to use.
+/// @param vao The VAO to use or a description of a VAO to create.
 /// @param program The shader program to use.
 /// @param options Additional options for the draw call:
 /// - `blendFunc`: The blend function to use. Defaults to `undefined`.
@@ -1579,29 +1601,41 @@ function updateFramebufferLayer(
 /// - `indexCount`: The number of indices to draw. Defaults to the size of the index buffer.
 /// - `indexOffset`: The offset into the index buffer. Defaults to 0.
 /// - `instances`: The number of instances to render. Defaults to 1.
-/// - `textures`: A mapping from uniform names to textures.
 /// - `uniforms`: A mapping from uniform names to values.
+///   As a convenience, you can also pass a Texture here, which will be moved to the `textures` mapping instead.
+///   If you want to modify both the texture unit and the texture, define the unit here and the texture in `textures`.
+/// - `textures`: A mapping from uniform names to textures.
 /// - `updateDepthBuffer`: Whether to update the depth buffer. Defaults to `undefined`.
 /// @returns The DrawCall object.
 function createDrawCall(
     gl: WebGL2,
     name: string,
-    vao: VAO,
+    vao: VAO | {
+        ibo: Parameters<typeof createVertexArrayObject>[2],
+        attributes: Parameters<typeof createVertexArrayObject>[3];
+    },
     program: Program,
     options: {
         blendFunc?: [BlendFunc, BlendFunc] | [BlendFunc, BlendFunc, BlendFunc, BlendFunc],
+        blendEquation?: BlendEquation | [BlendEquation, BlendEquation],
         cullFace?: CullFace,
         depthTest?: DepthTest,
         drawModeOverride?: DrawMode,
         indexCount?: number,
         indexOffset?: number,
         instances?: number,
+        uniforms?: Record<string, UniformValue | Texture>,
         textures?: Record<string, Texture>,
-        uniforms?: Record<string, UniformValue>,
         updateDepthBuffer?: boolean,
     } = {}
 ): DrawCall
 {
+    // If the vao argument is only a description of a VAO, build it first
+    if (!Object.hasOwn(vao, 'glo')) {
+        vao = createVertexArrayObject(gl, `${name}-vao`, vao.ibo, vao.attributes as any, program);
+    }
+    vao = vao as VAO;
+
     // Validate the index count and -offset.
     if (options.indexCount !== undefined && options.indexCount <= 0) {
         throwError(() => `Invalid index count: ${options.indexCount}.`);
@@ -1651,36 +1685,38 @@ function createDrawCall(
         }
     }
 
+    // Both the uniforms and texture records are optional but must be objects.
+    if (options.uniforms === undefined) {
+        options.uniforms = {};
+    }
+    if (options.textures === undefined) {
+        options.textures = {};
+    }
+
     // Ensure that all uniforms actually exist in the shader program
-    for (const uniformName of Object.keys(options.uniforms ?? {})) {
-        if (!program.uniforms.has(uniformName)) {
+    for (const [uniformName, value] of Object.entries(options.uniforms)) {
+        const uniform = program.uniforms.get(uniformName);
+        if (uniform === undefined) {
             logWarning(() => `Uniform "${uniformName}" of Draw Call "${name}" not found in shader program "${program.name}"!`);
+            continue;
+        }
+
+        // Move all textures from the uniforms to the textures option object.
+        if (isSamplerType(uniform.type)) {
+            if (typeof value !== 'number') {
+                if ((value as Texture)?.attachmentType !== AttachmentType.TEXTURE) {
+                    throwError(() => `Uniform "${uniformName}" is not a texture or a number.`);
+                }
+                options.textures[uniformName] = value as Texture;
+                delete options.uniforms![uniformName];
+            }
         }
     }
 
     // Create the texture unit mapping.
-    const maxTextureUnits: number = gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS);
-    const textures: Map<TextureUnitId, TextureUnit> = new Map();
-    if (options.textures !== undefined) {
-        for (const [uniformName, texture] of Object.entries(options.textures)) {
-            const uniform = program.uniforms.get(uniformName);
-            if (uniform === undefined) {
-                logWarning(() => `Uniform "${uniformName}" of Draw Call "${name}" not found in shader program "${program.name}".`);
-                continue;
-            }
-            if (!isSamplerType(uniform.type)) {
-                throwError(() => `Uniform "${uniformName}" in program "${program.name}" is not a texture sampler.`);
-            }
-            const unitId = uniform.value;
-            if (typeof unitId !== 'number' || !Number.isSafeInteger(unitId) || unitId < 0 || unitId >= maxTextureUnits) {
-                throwError(() => `Invalid texture unit id: ${unitId}. Valid range is [0, ${maxTextureUnits}).`);
-            }
-            const usedUnit = textures.get(unitId);
-            if (usedUnit === undefined) {
-                textures.set(unitId, createTextureUnit(texture));
-            } else {
-                addToTextureUnit(usedUnit, texture, unitId);
-            }
+    for (const uniformName of Object.keys(options.textures ?? {})) {
+        if (!program.uniforms.has(uniformName)) {
+            logWarning(() => `Sampler Uniform "${uniformName}" of Draw Call "${name}" not found in shader program "${program.name}"!`);
         }
     }
 
@@ -1689,15 +1725,16 @@ function createDrawCall(
         name,
         vao,
         program,
-        textures,
         indexCount,
         indexOffset,
         drawMode: options.drawModeOverride ?? vao.ibo.drawMode,
         instances: options.instances ?? 1,
-        uniform: options.uniforms ?? {},
+        uniform: options.uniforms as Record<string, UniformValue>,
+        textures: options.textures,
         cullFace: options.cullFace,
         depthTest: options.depthTest,
         blendFunc: options.blendFunc,
+        blendEquation: options.blendEquation,
         updateDepthBuffer: options.updateDepthBuffer,
     };
 }
@@ -1715,6 +1752,8 @@ function draw(gl: WebGL2, drawCall: DrawCall): void
     const vao = drawCall.vao;
     const program = drawCall.program;
 
+    let useDefaultBlendFunc: boolean = true;
+    let useDefaultBlendEquation: boolean = true;
     try {
         // Bind the shader program and VAO.
         gl.bindVertexArray(vao.glo);
@@ -1737,22 +1776,52 @@ function draw(gl: WebGL2, drawCall: DrawCall): void
                 gl.depthFunc(drawCall.depthTest);
             }
         }
+
+        // Set up blending.
         if (drawCall.blendFunc !== undefined) {
-            if (drawCall.blendFunc[0] === BlendFunc.ONE && drawCall.blendFunc[1] === BlendFunc.ZERO) {
-                gl.disable(gl.BLEND);
-            } else {
-                gl.enable(gl.BLEND);
-                if (drawCall.blendFunc.length === 4) {
+            if (drawCall.blendFunc.length === 2) {
+                if (drawCall.blendFunc[0] !== BlendFunc.ONE || drawCall.blendFunc[1] !== BlendFunc.ZERO) {
+                    gl.enable(gl.BLEND);
+                    gl.blendFunc(drawCall.blendFunc[0], drawCall.blendFunc[1]);
+                    useDefaultBlendFunc = false;
+                }
+            }
+            else if (drawCall.blendFunc.length === 4) {
+                if (
+                    drawCall.blendFunc[0] !== BlendFunc.ONE || drawCall.blendFunc[1] !== BlendFunc.ZERO &&
+                    drawCall.blendFunc[2] !== BlendFunc.ONE || drawCall.blendFunc[3] !== BlendFunc.ZERO
+                ) {
+                    gl.enable(gl.BLEND);
                     gl.blendFuncSeparate(
                         drawCall.blendFunc[0], drawCall.blendFunc[1],
                         drawCall.blendFunc[2], drawCall.blendFunc[3]);
-                } else if (drawCall.blendFunc.length === 2) {
-                    gl.blendFunc(drawCall.blendFunc[0], drawCall.blendFunc[1]);
-                } else {
-                    throwError(() => `Invalid blend function array length: ${drawCall.blendFunc!.length}.`);
+                    useDefaultBlendFunc = false;
+                }
+            }
+            else {
+                throwError(() => `Invalid blend function array length: ${drawCall.blendFunc!.length}.`);
+            }
+        }
+        if (drawCall.blendEquation !== undefined) {
+            if (Array.isArray(drawCall.blendEquation)) {
+                if (drawCall.blendEquation[0] !== BlendEquation.FUNC_ADD || drawCall.blendEquation[1] !== BlendEquation.FUNC_ADD) {
+                    if (useDefaultBlendFunc) {
+                        gl.enable(gl.BLEND);
+                    }
+                    gl.blendEquationSeparate(drawCall.blendEquation[0], drawCall.blendEquation[1]);
+                    useDefaultBlendEquation = false;
+                }
+            } else {
+                if (drawCall.blendEquation !== BlendEquation.FUNC_ADD) {
+                    if (useDefaultBlendFunc) {
+                        gl.enable(gl.BLEND);
+                    }
+                    gl.blendEquation(drawCall.blendEquation);
+                    useDefaultBlendEquation = false;
                 }
             }
         }
+
         if (drawCall.updateDepthBuffer !== undefined) {
             gl.depthMask(drawCall.updateDepthBuffer);
         }
@@ -1774,20 +1843,63 @@ function draw(gl: WebGL2, drawCall: DrawCall): void
             }
         }
 
-        // Bind the textures
-        for (const [id, unit] of drawCall.textures) {
-            gl.activeTexture(gl.TEXTURE0 + id);
-            if (unit.texture_2d !== undefined) {
-                gl.bindTexture(gl.TEXTURE_2D, unit.texture_2d.glo);
-            }
-            if (unit.texture_3d !== undefined) {
-                gl.bindTexture(gl.TEXTURE_3D, unit.texture_3d.glo);
-            }
-            if (unit.texture_cube !== undefined) {
-                gl.bindTexture(gl.TEXTURE_CUBE_MAP, unit.texture_cube.glo);
-            }
-            if (unit.texture_2d_array !== undefined) {
-                gl.bindTexture(gl.TEXTURE_2D_ARRAY, unit.texture_2d_array.glo);
+        { // Bind the textures
+            const maxTextureUnits = gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS);
+            const usedTextureUnits: Map<TextureUnitId, TextureUnit> = new Map();
+            for (const [name, texture] of Object.entries(drawCall.textures)) {
+                const uniform = program.uniforms.get(name);
+                if (!uniform) {
+                    throwError(() => `Sampler Uniform "${name}" not found in program "${program.name}"`);
+                }
+                if (!isSamplerType(uniform.type)) {
+                    throwError(() => `Uniform "${name}" in program "${program.name}" is not a sampler.`);
+                }
+                const unit: number = uniform.value as number;
+                if (unit === undefined || typeof unit !== 'number' || !Number.isSafeInteger(unit)) {
+                    throwError(() => `Value of Uniform "${name}" in program "${program.name}" is not a texture unit.`);
+                }
+                if (unit < 0 || unit >= maxTextureUnits) {
+                    throwError(() => `Invalid texture unit ${unit} for uniform "${name}" in program "${program.name}".`);
+                }
+
+                const textureUnit = usedTextureUnits.get(unit) || {};
+                gl.activeTexture(gl.TEXTURE0 + unit);
+                switch (texture.target) {
+                    case TextureTarget.TEXTURE_2D: {
+                        if (textureUnit.texture_2d !== undefined) {
+                            throwError(() => `Texture unit ${unit} is already used by another 2D texture.`);
+                        }
+                        gl.bindTexture(gl.TEXTURE_2D, texture.glo);
+                        textureUnit.texture_2d = texture;
+                        break;
+                    }
+                    case TextureTarget.TEXTURE_3D: {
+                        if (textureUnit.texture_3d !== undefined) {
+                            throwError(() => `Texture unit ${unit} is already used by another 3D texture.`);
+                        }
+                        gl.bindTexture(gl.TEXTURE_3D, texture.glo);
+                        textureUnit.texture_3d = texture;
+                        break;
+                    }
+                    case TextureTarget.TEXTURE_CUBE_MAP: {
+                        if (textureUnit.texture_cube !== undefined) {
+                            throwError(() => `Texture unit ${unit} is already used by another cube map texture.`);
+                        }
+                        gl.bindTexture(gl.TEXTURE_CUBE_MAP, texture.glo);
+                        textureUnit.texture_cube = texture;
+                        break;
+                    }
+                    case TextureTarget.TEXTURE_2D_ARRAY: {
+                        if (textureUnit.texture_2d_array !== undefined) {
+                            throwError(() => `Texture unit ${unit} is already used by another 2D array texture.`);
+                        }
+                        gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture.glo);
+                        textureUnit.texture_2d_array = texture;
+                        break;
+                    }
+                    default: assertUnreachable(texture.target);
+                }
+                usedTextureUnits.set(unit, textureUnit);
             }
         }
 
@@ -1819,7 +1931,7 @@ function draw(gl: WebGL2, drawCall: DrawCall): void
 
     // Always reset the WebGL state, if you modified it.
     finally {
-        if (drawCall.textures.size > 0) {
+        if (Object.keys(drawCall.textures).length > 0) {
             gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
             gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
             gl.bindTexture(gl.TEXTURE_3D, null);
@@ -1829,9 +1941,14 @@ function draw(gl: WebGL2, drawCall: DrawCall): void
         if (drawCall.updateDepthBuffer !== undefined) {
             gl.depthMask(true);
         }
-        if (drawCall.blendFunc !== undefined) {
-            gl.blendFunc(gl.ONE, gl.ZERO);
+        if (!useDefaultBlendFunc || !useDefaultBlendEquation) {
             gl.disable(gl.BLEND);
+            if (!useDefaultBlendFunc) {
+                gl.blendFunc(gl.ONE, gl.ZERO);
+            }
+            if (!useDefaultBlendEquation) {
+                gl.blendEquation(gl.FUNC_ADD);
+            }
         }
         if (drawCall.depthTest !== undefined) {
             gl.depthFunc(gl.ALWAYS);
@@ -1846,8 +1963,6 @@ function draw(gl: WebGL2, drawCall: DrawCall): void
     }
 }
 // TODO: function to perform a sequence of draw calls, which can be optimized with fewer state changes?
-// TODO: to change textures on the fly, one would need to update the texture units in the draw call.
-// Maybe have a function for that? (so far, I didn't need it)
 // TODO: Callback with debug information for draw calls (e.g. number of vertices, number of instances, how many textures exist, are being used etc.)
 
 
@@ -2278,6 +2393,7 @@ function updateUniforms(gl: WebGL2, program: Program, defaults: Record<string, U
     // In order to respect manually assigned texture units though, we have to
     // do that _after_ all of the manually assigned uniforms have been set.
     // So we collect all texture samplers here and assign them later.
+    const maxTextureUnits: number = gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS);
     const textureSamplers: Array<[string, Uniform]> = [];
     const usedTextureUnits: Set<number> = new Set();
 
@@ -2318,6 +2434,9 @@ function updateUniforms(gl: WebGL2, program: Program, defaults: Record<string, U
                 value = getDefaultUniformValue(type, size);
             }
             else if (isSamplerType(type)) {
+                if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value >= maxTextureUnits) {
+                    throwError(() => `Invalid texture unit id: ${value}. Valid range is [0, ${maxTextureUnits}).`);
+                }
                 usedTextureUnits.add(value as number);
             }
 
@@ -2332,6 +2451,9 @@ function updateUniforms(gl: WebGL2, program: Program, defaults: Record<string, U
         let unitId = 0;
         while (usedTextureUnits.has(unitId)) {
             unitId++;
+            if (unitId >= maxTextureUnits) {
+                throwError(() => `No more texture units available for sampler "${name}".`);
+            }
         }
         usedTextureUnits.add(unitId);
         uniform.value = unitId;
@@ -2873,57 +2995,6 @@ function isFloatFormat(internalFormat: TextureInternalFormat): boolean
     }
 }
 
-
-/// Creates a new texture unit object with the given texture.
-function createTextureUnit(texture: Texture): TextureUnit
-{
-    switch (texture.target) {
-        case TextureTarget.TEXTURE_2D:
-            return { texture_2d: texture };
-        case TextureTarget.TEXTURE_3D:
-            return { texture_3d: texture };
-        case TextureTarget.TEXTURE_CUBE_MAP:
-            return { texture_cube: texture };
-        case TextureTarget.TEXTURE_2D_ARRAY:
-            return { texture_2d_array: texture };
-        default:
-            assertUnreachable(texture.target);
-    }
-}
-
-
-/// Adds a texture into a texture unit.
-function addToTextureUnit(textureUnit: TextureUnit, texture: Texture, unitId: number): void
-{
-    switch (texture.target) {
-        case TextureTarget.TEXTURE_2D:
-            if (textureUnit.texture_2d !== undefined) {
-                throwError(() => `Texture unit ${unitId} already contains a 2D texture!`);
-            }
-            textureUnit.texture_2d = texture;
-            break;
-        case TextureTarget.TEXTURE_3D:
-            if (textureUnit.texture_3d !== undefined) {
-                throwError(() => `Texture unit ${unitId} already contains a 3D texture!`);
-            }
-            textureUnit.texture_3d = texture;
-            break;
-        case TextureTarget.TEXTURE_CUBE_MAP:
-            if (textureUnit.texture_cube !== undefined) {
-                throwError(() => `Texture unit ${unitId} already contains a cube map!`);
-            }
-            textureUnit.texture_cube = texture;
-            break;
-        case TextureTarget.TEXTURE_2D_ARRAY:
-            if (textureUnit.texture_2d_array !== undefined) {
-                throwError(() => `Texture unit ${unitId} already contains a 2D array texture!`);
-            }
-            textureUnit.texture_2d_array = texture;
-            break;
-        default:
-            assertUnreachable(texture.target);
-    }
-}
 
 /// Resets the WebGL context to its initial state.
 /// Copied from:

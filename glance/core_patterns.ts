@@ -1,16 +1,21 @@
 export
 {
     createBPGeometry,
+    createFlatGeometry,
+    createScreenPass,
     createSkybox,
     FramebufferStack,
     loadCubemap,
     loadDataVolume,
     loadTexture,
+    Profiler,
+    WebGLTimer,
 };
 
 
 import
 {
+    logWarning,
     throwError,
 } from "./dev";
 import
@@ -21,6 +26,7 @@ import
 {
     createDrawCall,
     createProgram,
+    createShader,
     createTexture,
     createVertexArrayObject,
     updateTextureData,
@@ -28,21 +34,32 @@ import
 import
 {
     createBox,
+    createScreenQuad,
     loadObj,
 } from "./assets/geo";
 import
 {
+    loadHDR,
+} from "./assets/hdr";
+import
+{
     CullFace,
     DepthTest,
+    ShaderStage,
     TextureFilter,
     TextureInternalFormat,
 } from "./types";
 import type {
     DrawCall,
+    FragmentShader,
     Framebuffer,
     Texture,
     WebGL2,
 } from "./types";
+import type
+{
+    Geometry,
+} from "./assets/geo";
 import { Vec3 } from "./math";
 
 
@@ -78,36 +95,65 @@ async function loadTexture(
     url: string,
     options: TextureOptions = {}): Promise<Texture>
 {
-    // Load the image from the url.
-    // The promise is not executed right away, so we will have to wait for it to resolve later.
-    const loadImage: Promise<HTMLImageElement> = new Promise((resolve, reject) =>
-    {
-        const image = new Image();
-        image.onload = () => resolve(image);
-        image.onerror = reject;
-        if ((new URL(url, window.location.href)).origin !== window.location.origin) {
-            image.crossOrigin = "anonymous";
-        }
-        image.src = url;
-    });
-
     // Extract the file name (without extension) from the URL.
     const name = url.split('/').at(-1).split('.').at(0);
 
+    let texture: Texture | undefined;
     try {
-        // Get the image from the URL
-        const image: HTMLImageElement = await loadImage;
+        // Load an HDR texture if the URL ends with ".hdr".
+        if (url.endsWith('.hdr')) {
+            // The srcDataType option must be gl.FLOAT for HDR textures.
+            if (options.srcDataType !== undefined && options.srcDataType !== gl.FLOAT) {
+                logWarning(() => `Ignoring srcDataType option for HDR texture: ${options.srcDataType}`);
+            }
 
-        // Once we have it, create the empty WebGL texture.
-        const texture: Texture = createTexture(gl, name, image.naturalWidth, image.naturalHeight, options);
+            // The default internal format for HDR textures is R11F_G11F_B10F.
+            if (options.internalFormat === undefined) {
+                options.internalFormat = TextureInternalFormat.R11F_G11F_B10F;
+            }
 
-        // Define the texture data.
-        updateTextureData(gl, texture, image, options);
+            // Load the HDR image and create the texture.
+            const hdrImage = await loadHDR(new URL(url, window.location.href));
+            texture = createTexture(gl, name, hdrImage.width, hdrImage.height, options);
+
+            // Update the texture data.
+            updateTextureData(gl, texture, hdrImage.data, { ...options, srcDataType: gl.FLOAT });
+        }
+
+        // Otherwise, load a regular image.
+        else {
+            // Load the image from the url.
+            // The promise is not executed right away, so we will have to wait for it to resolve later.
+            const loadImage: Promise<HTMLImageElement> = new Promise((resolve, reject) =>
+            {
+                const image = new Image();
+                image.onload = () => resolve(image);
+                image.onerror = reject;
+                if ((new URL(url, window.location.href)).origin !== window.location.origin) {
+                    image.crossOrigin = "anonymous";
+                }
+                image.src = url;
+            });
+
+            // Get the image from the URL
+            const image: HTMLImageElement = await loadImage;
+
+            // Once we have it, create the empty WebGL texture.
+            texture = createTexture(gl, name, image.naturalWidth, image.naturalHeight, options);
+
+            // Define the texture data.
+            updateTextureData(gl, texture, image, options);
+        }
 
         // Return the finished texture.
         return texture;
+    }
 
-    } catch (error) {
+    // If an error occurs, clean up and re-throw the error.
+    catch (error) {
+        if (texture !== undefined) {
+            gl.deleteTexture(texture.glo);
+        }
         throwError(() => `Failed to create texture from url: "${url}": ${(error as any).message}`);
     }
 }
@@ -354,7 +400,9 @@ class FramebufferStack
         const [currentReadBuffer, currentDrawBuffer] = this._stack.at(-1) ?? [null, undefined];
         if (currentReadBuffer === framebuffer && currentDrawBuffer === drawBuffer) {
             return;
-        }
+        }// TODO: this is wrong. Always push, even if the same framebuffer is bound
+        //  just don't re-bind it. Conversely, always pop and if the next framebuffer
+        //  on the stack, just don't re-bind it.
 
         // Push the given framebuffer onto the stack.
         this._stack.push([framebuffer, drawBuffer]);
@@ -429,48 +477,122 @@ function getFramebufferSize(framebuffer: Framebuffer): [number, number]
     }
 }
 
+// =============================================================================
+// Profiling
+// =============================================================================
+
+
+class WebGLTimer
+{
+    private _ext: any;
+    private _query: WebGLQuery | null;
+
+    constructor(gl: WebGL2, ext: any)
+    {
+        this._ext = ext;
+        this._query = gl.createQuery();
+        gl.beginQuery(this._ext.TIME_ELAPSED_EXT, this._query as WebGLQuery);
+    }
+
+    public stop(gl: WebGL2, callback: (ms: number) => void): void
+    {
+        gl.endQuery(this._ext.TIME_ELAPSED_EXT);
+        const checkResult = () =>
+        {
+            // If the query was deleted, do nothing.
+            if (this._query === null) {
+                logWarning(() => "WebGLTimer query has ended already");
+                return;
+            }
+
+            const available = gl.getQueryParameter(this._query, gl.QUERY_RESULT_AVAILABLE);
+            const disjoint = gl.getParameter(this._ext.GPU_DISJOINT_EXT);
+
+            // If the result is available and not disjoint, call the callback.
+            if (available && !disjoint) {
+                const timeElapsed = gl.getQueryParameter(this._query, gl.QUERY_RESULT);
+                callback(timeElapsed / 1000000);
+            }
+
+            // If the result is available, or something went wrong, delete the query.
+            if (available || disjoint) {
+                gl.deleteQuery(this._query);
+                this._query = null;
+                return;
+            }
+
+            // Otherwise, check again in the next frame.
+            requestAnimationFrame(checkResult);
+        };
+        setTimeout(checkResult, 0);
+    }
+}
+
+class Profiler
+{
+    private _ext: any;
+
+    constructor(gl: WebGL2)
+    {
+        this._ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+        if (this._ext === null) {
+            this._ext = gl.getExtension('EXT_disjoint_timer_query');
+        }
+        if (this._ext === null) {
+            throwError(() => "WebGL2 Timer Query extension not supported. In Firefox, enable `webgl.enable-privileged-extensions` in `about:config`");
+        }
+    }
+
+    public start(gl: WebGL2): WebGLTimer
+    {
+        return new WebGLTimer(gl, this._ext);
+    }
+}
 
 // =============================================================================
 // Common Entities
 // =============================================================================
 
 /// Create a Blinn-Phong shaded geometry from an URL to a OBJ file, with textures.
-/// @param gl The WebGL2 context.
-/// @param url The URL of the OBJ file to load.
-/// @param textureURLs An object with the URLs of the textures to load.
+/// @param gl   The WebGL2 context.
+/// @param geo  The geometry to render.
+///    Can be a Geometry object or a URL to an OBJ file.
+/// @param textureURLs An object with the textures or URLs of the textures to load.
 ///  The object should have the following properties:
-///  - `diffuse`: URL of the diffuse texture (required).
-///  - `specular`: URL of the specular texture (optional).
-///  - `ambient`: URL of the ambient texture (optional).
+///  - `diffuse`: The diffuse texture (required).
+///  - `specular`: The specular texture (optional).
+///  - `ambient`: The ambient texture (optional).
 /// @param options Optional settings:
 ///  - `renderNormals`: Whether to render normals to an additional color attachment (defaults to `false`).
 ///  - `renderDepth`: Whether to render depth to an additional color attachment (defaults to `false`).
 /// The returned draw call will have the following uniforms:
-/// - `u_modelXform`: The model transformation matrix.
-/// - `u_viewXform`: The view transformation matrix.
-/// - `u_projectionXform`: The projection transformation matrix.
-/// - `u_ambient`: Ambient light intensity, defaults to 0.15.
-/// - `u_specularPower`: Specular power, defaults to 64.
-/// - `u_specularIntensity`: Specular intensity, defaults to 0.8.
-/// - `u_lightDirection`: Direction of the light, defaults to `[1, 1, 1]`.
-/// - `u_cameraPosition`: Position of the camera, defaults to `[0, 0, 0]`.
+///  - `u_modelXform`: The model transformation matrix.
+///  - `u_viewXform`: The view transformation matrix.
+///  - `u_projectionXform`: The projection transformation matrix.
+///  - `u_ambient`: Ambient light intensity, defaults to 0.15.
+///  - `u_specularPower`: Specular power, defaults to 64.
+///  - `u_specularIntensity`: Specular intensity, defaults to 0.8.
+///  - `u_lightDirection`: Direction of the light, defaults to `[1, 1, 1]`.
+///  - `u_viewPosition`: Position of the viewer, defaults to `[0, 0, 0]`.
 /// If the textures are not provided, an additional uniform will be:
-/// - `u_diffuseColor`: Diffuse color, defaults to `[1, 1, 1]`.
+///  - `u_diffuseColor`: Diffuse color, defaults to `[1, 1, 1]`.
 /// If render normals and/or depth is enabled, the fragment shader will render up to two additional color attachments:
-/// - normal at 1 (if enabled)
-/// - depth either at 2 (if both are enabled) or at 1 (if only depth is enabled).
+///  - normal at 1 (if enabled)
+///  - depth either at 2 (if both are enabled) or at 1 (if only depth is enabled).
 /// @returns A promise that resolves to the created draw call.
 async function createBPGeometry(
     gl: WebGL2,
-    objURL: string,
-    textureURLs: {
-        diffuse: string,
-        specular?: string,
-        ambient?: string,
+    geo: Geometry | string,
+    textures: {
+        diffuse: string | Texture,
+        specular?: string | Texture,
+        ambient?: string | Texture,
+        // TODO: add optional normal map
     },
     options: {
         renderNormals?: boolean,
         renderDepth?: boolean,
+        // TODO: option to decide between pointlight and directional light
     } = {}
 ): Promise<DrawCall>
 {
@@ -492,7 +614,7 @@ out vec2 f_texCoord;
 void main() {
     vec4 worldPosition = u_modelXform * vec4(a_pos, 1.0);
     f_worldPosition = worldPosition.xyz;
-    f_normal = (u_modelXform * vec4(a_normal, 0)).xyz;
+    f_normal = (u_modelXform * vec4(a_normal, 0.0)).xyz;
     f_texCoord = a_texCoord;
     gl_Position = u_projectionXform * u_viewXform * worldPosition;
 }`;
@@ -500,9 +622,9 @@ void main() {
     const fragmentShader = `#version 300 es
 precision mediump float;
 
-#define HAS_DIFFUSE_TEXTURE ${textureURLs.diffuse ? 1 : 0}
-#define HAS_SPECULAR_TEXTURE ${textureURLs.specular ? 1 : 0}
-#define HAS_AMBIENT_TEXTURE ${textureURLs.ambient ? 1 : 0}
+#define HAS_DIFFUSE_TEXTURE ${textures.diffuse ? 1 : 0}
+#define HAS_SPECULAR_TEXTURE ${textures.specular ? 1 : 0}
+#define HAS_AMBIENT_TEXTURE ${textures.ambient ? 1 : 0}
 #define RENDER_NORMALS ${options.renderNormals ? 1 : 0}
 #define RENDER_DEPTH ${options.renderDepth ? 1 : 0}
 
@@ -510,7 +632,7 @@ uniform float u_ambient;
 uniform float u_specularPower;
 uniform float u_specularIntensity;
 uniform vec3 u_lightDirection;
-uniform vec3 u_cameraPosition;
+uniform vec3 u_viewPosition;
 #if RENDER_DEPTH
     uniform float u_near;
     uniform float u_far;
@@ -560,7 +682,7 @@ void main() {
     vec3 normal = normalize(f_normal);
 
     float diffuse = ambient + max(0.0, dot(u_lightDirection, normal)) * (1.0 - ambient);
-    vec3 viewDirection = normalize(u_cameraPosition - f_worldPosition);
+    vec3 viewDirection = normalize(u_viewPosition - f_worldPosition);
     vec3 halfway = normalize(viewDirection + u_lightDirection);
     float specular = max(0.0, dot(normal, halfway));
     vec3 color = diffuseColor * diffuse + vec3(1.0) * (specularFactor * pow(specular, u_specularPower) * u_specularIntensity);
@@ -578,11 +700,21 @@ void main() {
 #endif
 }`;
     // Load the geometry and textures asynchronously.
-    const geoPromise = loadObj(objURL);
+    const geoPromise: Promise<Geometry> = typeof geo === 'string' ? loadObj(geo) : Promise.resolve(geo);
+    const getTexture = (texture: string | Texture | undefined): Promise<Texture | null> =>
+    {
+        if (texture === undefined) {
+            return Promise.resolve(null);
+        }
+        if (typeof texture === 'string') {
+            return loadTexture(gl, texture, { wrap: gl.REPEAT });
+        }
+        return Promise.resolve(texture);
+    };
     const texturesPromise = Promise.all([
-        textureURLs.diffuse ? loadTexture(gl, textureURLs.diffuse) : null,
-        textureURLs.specular ? loadTexture(gl, textureURLs.specular) : null,
-        textureURLs.ambient ? loadTexture(gl, textureURLs.ambient) : null,
+        getTexture(textures.diffuse),
+        getTexture(textures.specular),
+        getTexture(textures.ambient),
     ]);
 
     // Create the program.
@@ -591,13 +723,13 @@ void main() {
         u_specularPower: 64,
         u_specularFactor: 0.8,
         u_lightDirection: Vec3.normalOf(Vec3.all(1)),
-        u_cameraPosition: [0, 0, 0],
+        u_viewPosition: [0, 0, 0],
     };
-    if (!textureURLs.diffuse) {
+    if (!textures.diffuse) {
         uniforms.u_diffuseColor = [1, 1, 1];
     }
     const program = createProgram(gl, '__glance-blinn-phong-program', vertexShader, fragmentShader, uniforms);
-    const geo = await geoPromise;
+    geo = await geoPromise;
     const vao = createVertexArrayObject(gl, '__glance-blinn-phong-vao',
         geo.indices,
         {
@@ -608,20 +740,124 @@ void main() {
         program,
     );
     const loadedTextures = await texturesPromise;
-    const textures: Record<string, Texture> = {};
+    const drawCallTextures: Record<string, Texture> = {};
     if (loadedTextures[0] !== null) {
-        textures.u_texDiffuse = loadedTextures[0];
+        drawCallTextures.u_texDiffuse = loadedTextures[0];
     }
     if (loadedTextures[1] !== null) {
-        textures.u_texSpecular = loadedTextures[1];
+        drawCallTextures.u_texSpecular = loadedTextures[1];
     }
     if (loadedTextures[2] !== null) {
-        textures.u_texAmbient = loadedTextures[2];
+        drawCallTextures.u_texAmbient = loadedTextures[2];
     }
     return createDrawCall(gl, geo.name, vao, program, {
         cullFace: CullFace.BACK,
         depthTest: DepthTest.LESS,
-        textures
+        textures: drawCallTextures,
+    });
+}
+
+
+/// Create a flat-shaded geometry with a single color
+/// @param gl The WebGL2 context.
+/// @param geo The geometry to render.
+///        Can be a Geometry object or a URL to an OBJ file.
+/// @param color The RGB color of the geometry (defaults to white = [1, 1, 1]).
+///        If a string is passed, it is interpreted as a URL to a texture.
+/// The returned draw call will have the following uniforms:
+/// - `u_modelXform`: The model transformation matrix.
+/// - `u_viewXform`: The view transformation matrix.
+/// - `u_projectionXform`: The projection transformation matrix.
+/// If a color is provided, the following uniform will be added:
+/// - `u_color`: Flat color.
+/// If a texture is provided, the following uniform will be added:
+/// - `u_texDiffuse`: Diffuse texture.
+/// @returns The created draw call.
+async function createFlatGeometry(
+    gl: WebGL2,
+    geo: Geometry | string,
+    color?: [number, number, number] | string | Texture,
+): Promise<DrawCall>
+{
+    const hasTexture = typeof color !== 'undefined' && !Array.isArray(color);
+
+    const vertexShader = `#version 300 es
+precision highp float;
+
+#define HAS_TEXTURE ${hasTexture ? 1 : 0}
+
+uniform mat4 u_modelXform;
+uniform mat4 u_viewXform;
+uniform mat4 u_projectionXform;
+
+in vec3 a_pos;
+#if HAS_TEXTURE
+    in vec2 a_texCoord;
+    out vec2 f_texCoord;
+#endif
+
+void main() {
+    gl_Position = u_projectionXform * u_viewXform * u_modelXform * vec4(a_pos, 1.0);
+#if HAS_TEXTURE
+    f_texCoord = a_texCoord;
+#endif
+}`;
+
+    const fragmentShader = `#version 300 es
+precision mediump float;
+
+#define HAS_TEXTURE ${hasTexture ? 1 : 0}
+
+uniform vec3 u_color;
+#if HAS_TEXTURE
+    uniform sampler2D u_texDiffuse;
+    in vec2 f_texCoord;
+#endif
+
+layout (location = 0) out vec4 o_fragColor;
+void main() {
+#if HAS_TEXTURE
+    o_fragColor = texture(u_texDiffuse, f_texCoord);
+#else
+    o_fragColor = vec4(u_color, 1.0);
+#endif
+}`;
+
+    if (typeof geo === 'string') {
+        geo = await loadObj(geo);
+    }
+
+    const shortName = geo.name.replace(/(-geo)$/, ''); // Remove trailing "-geo".
+    const program = createProgram(gl, '__glance-flat-program', vertexShader, fragmentShader);
+
+    const attributes: Record<string, any> = {
+        a_pos: { data: geo.positions, height: 3 },
+    };
+    if (hasTexture) {
+        attributes.a_texCoord = { data: geo.texCoords, height: 2 };
+    }
+    const vao = createVertexArrayObject(gl, `${shortName}-vao`,
+        geo.indices,
+        attributes,
+        program,
+    );
+
+    const uniforms: Record<string, any> = {};
+    const textures: Record<string, Texture> = {};
+    if (hasTexture) {
+        if (typeof color === 'string') {
+            textures.u_texDiffuse = await loadTexture(gl, color as string);
+        } else {
+            textures.u_texDiffuse = color as Texture;
+        }
+    } else {
+        uniforms.u_color = color ?? [1, 1, 1];
+    }
+    return createDrawCall(gl, shortName, vao, program, {
+        cullFace: CullFace.BACK,
+        depthTest: DepthTest.LESS,
+        uniforms,
+        textures,
     });
 }
 
@@ -640,7 +876,7 @@ void main() {
 async function createSkybox(
     gl: WebGL2,
     urls: [string, string, string, string, string, string],
-    options: {
+    options: TextureOptions & {
         renderNormals?: boolean,
         renderDepth?: boolean,
     } = {}
@@ -688,7 +924,7 @@ void main() {
 #endif
 }`;
 
-    const cubemapPromise = loadCubemap(gl, urls);
+    const cubemapPromise = loadCubemap(gl, urls, options);
     const geo = createBox('__glance-skybox-geo');
     const program = createProgram(gl, '__glance-skybox-program', vertexShader, fragmentShader);
     // TODO: caching of attribute buffers etc. would come in handy here
@@ -706,4 +942,50 @@ void main() {
             u_skybox: cubeMap,
         },
     });
+}
+
+/// Create a screen quad geometry with a given Fragment Shader.
+/// The fragment shader can expect the following inputs:
+/// - `f_texCoord`: The 2D texture coordinate of the fragment.
+async function createScreenPass(
+    gl: WebGL2,
+    name: string,
+    shader: FragmentShader | string,
+    options: Parameters<typeof createDrawCall>[4] = {}
+): Promise<DrawCall>
+{
+
+    const vertexShader = `#version 300 es
+precision highp float;
+
+in vec2 a_pos;
+in vec2 a_texCoord;
+
+out vec2 f_texCoord;
+
+void main() {
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+    f_texCoord = a_texCoord;
+}`;
+
+    if (typeof shader === 'string') {
+        shader = createShader(gl, `${name}-fs`, ShaderStage.FRAGMENT, shader);
+    }
+    const program = createProgram(gl, '__glance-quad-program', vertexShader, shader);
+
+    const geo = createScreenQuad('__glance-quad-geo');
+    const vao = createVertexArrayObject(gl, `${name}-vao`,
+        geo.indices,
+        {
+            a_pos: { data: geo.positions, height: 2 },
+            a_texCoord: { data: geo.texCoords, height: 2 },
+        },
+        program,
+    );
+
+    return Promise.resolve(createDrawCall(gl, name, vao, program, {
+        cullFace: CullFace.NONE,
+        depthTest: DepthTest.NONE,
+        ...options,
+    }));
 }

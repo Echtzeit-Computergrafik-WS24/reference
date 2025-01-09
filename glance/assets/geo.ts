@@ -3,7 +3,7 @@ export
     createBox,
     createCircularPlane,
     createPlane,
-    createScreenQuat,
+    createScreenQuad,
     createSphere,
     createTorusKnot,
     getBaricentricCoordinates,
@@ -390,21 +390,21 @@ function createSphere(name: string, options: {
 
 /// Creates a 2D screen-filling quad geometry.
 /// @param name Name of the geometry.
-/// @param in2D If true, the quad is created in 2D space, without normals and tangents. Default: false.
+/// @param in2D If true, the quad is created in 2D space, without normals and tangents. Default: true.
 /// @param left Left edge of the quad in NDC, default: -1.
 /// @param right Right edge of the quad in NDC, default: +1.
 /// @param top Top edge of the quad in NDC, default: +1.
 /// @param bottom Bottom edge of the quad in NDC, default: -1.
 /// @returns
-function createScreenQuat(name: string, options: {
-    in2D?: boolean, // TODO: this should be the default
+function createScreenQuad(name: string, options: {
+    in2D?: boolean,
     left?: number,
     right?: number,
     top?: number,
     bottom?: number,
 } = {})
 {
-    const in2D = options.in2D ?? false;
+    const in2D = options.in2D ?? true;
     const left = options.left ?? -1;
     const right = options.right ?? +1;
     const top = options.top ?? +1;
