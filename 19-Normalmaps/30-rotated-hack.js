@@ -137,9 +137,9 @@ const geo = glance.createDrawCall(gl, "geo",
     geoProgram,
     {
         textures: {
-            u_texDiffuse: await glance.loadTexture(gl, "/img/rockwall-diffuse.webp", { wrap: gl.REPEAT }),
-            u_texSpecular: await glance.loadTexture(gl, "/img/rockwall-specular.webp", { wrap: gl.REPEAT }),
-            u_texNormal: await glance.loadTexture(gl, "/img/rockwall-normal.webp", { wrap: gl.REPEAT }),
+            u_texDiffuse: await glance.loadTexture(gl, "https://echtzeit-computergrafik-ws24.github.io/img/rockwall-diffuse.webp", { wrap: gl.REPEAT }),
+            u_texSpecular: await glance.loadTexture(gl, "https://echtzeit-computergrafik-ws24.github.io/img/rockwall-specular.webp", { wrap: gl.REPEAT }),
+            u_texNormal: await glance.loadTexture(gl, "https://echtzeit-computergrafik-ws24.github.io/img/rockwall-normal.webp", { wrap: gl.REPEAT }),
         },
         // cullFace: gl.BACK,
         depthTest: gl.LESS,

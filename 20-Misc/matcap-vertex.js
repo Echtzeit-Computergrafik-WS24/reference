@@ -83,7 +83,7 @@ const geoProgram = glance.createProgram(gl, "geo-shader", geoVSSource, geoFSSour
 
 // Geometry
 //const geoGeo = glance.createSphere("geo-geo");
-const geoGeo = await glance.loadObj("/geo/suzanne.obj");
+const geoGeo = await glance.loadObj("https://echtzeit-computergrafik-ws24.github.io/geo/suzanne.obj");
 
 // Draw Call
 const geo = glance.createDrawCall(gl, "geo",
@@ -100,7 +100,7 @@ const geo = glance.createDrawCall(gl, "geo",
         cullFace: gl.BACK,
         depthTest: gl.LESS,
         textures: {
-            u_matcap: await glance.loadTexture(gl, "/img/matcap-zbrush.webp", { wrap: gl.CLAMP_TO_EDGE }),
+            u_matcap: await glance.loadTexture(gl, "https://echtzeit-computergrafik-ws24.github.io/img/matcap-zbrush.webp", { wrap: gl.CLAMP_TO_EDGE }),
         }
     }
 );

@@ -42,12 +42,12 @@ geo.cullFace = gl.NONE;
 // Skybox
 const skybox = await glance.createSkybox(gl,
     [
-        "/img/envmap-prairie-px.webp",
-        "/img/envmap-prairie-nx.webp",
-        "/img/envmap-prairie-py.webp",
-        "/img/envmap-prairie-ny.webp",
-        "/img/envmap-prairie-pz.webp",
-        "/img/envmap-prairie-nz.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-px.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-nx.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-py.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-ny.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-pz.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-nz.webp",
     ],
 );
 

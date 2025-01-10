@@ -102,7 +102,7 @@ const geoProgram = glance.createProgram(gl, "geo-shader", geoVSSource, geoFSSour
 });
 
 // Geometry
-const geoGeo = await glance.loadObj("/geo/horse.obj");
+const geoGeo = await glance.loadObj("https://echtzeit-computergrafik-ws24.github.io/geo/horse.obj");
 
 // Draw Call
 const geo = glance.createDrawCall(gl, "geo",
@@ -120,7 +120,7 @@ const geo = glance.createDrawCall(gl, "geo",
         cullFace: gl.BACK,
         depthTest: gl.LESS,
         textures: {
-            u_texDiffuse: await glance.loadTexture(gl, "/img/horse-diffuse.png"),
+            u_texDiffuse: await glance.loadTexture(gl, "https://echtzeit-computergrafik-ws24.github.io/img/horse-diffuse.png"),
         }
     }
 );
@@ -132,12 +132,12 @@ const geo = glance.createDrawCall(gl, "geo",
 /// Skybox
 const skybox = await glance.createSkybox(gl,
     [
-        "/img/envmap-prairie-px.webp",
-        "/img/envmap-prairie-nx.webp",
-        "/img/envmap-prairie-py.webp",
-        "/img/envmap-prairie-ny.webp",
-        "/img/envmap-prairie-pz.webp",
-        "/img/envmap-prairie-nz.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-px.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-nx.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-py.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-ny.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-pz.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-prairie-nz.webp",
     ],
 );
 

@@ -147,9 +147,9 @@ const geo = glance.createDrawCall(gl, "geo",
     geoProgram,
     {
         textures: {
-            u_texDiffuse: await glance.loadTexture(gl, "/img/pebbles-diffuse.webp"),
-            u_texSpecular: await glance.loadTexture(gl, "/img/pebbles-specular.webp"),
-            u_texNormal: await glance.loadTexture(gl, "/img/pebbles-normal.webp"),
+            u_texDiffuse: await glance.loadTexture(gl, "https://echtzeit-computergrafik-ws24.github.io/img/pebbles-diffuse.webp"),
+            u_texSpecular: await glance.loadTexture(gl, "https://echtzeit-computergrafik-ws24.github.io/img/pebbles-specular.webp"),
+            u_texNormal: await glance.loadTexture(gl, "https://echtzeit-computergrafik-ws24.github.io/img/pebbles-normal.webp"),
         },
         depthTest: gl.LESS,
     }

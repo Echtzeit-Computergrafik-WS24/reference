@@ -36,10 +36,10 @@ onResize(() =>
 // Resources
 // =====================================================================
 
-const marbleDiffuse = await glance.loadTexture(gl, "/img/marble-diffuse.webp", { wrap: gl.REPEAT });
-const marbleSpecular = await glance.loadTexture(gl, "/img/marble-specular.webp", { wrap: gl.REPEAT });
+const marbleDiffuse = await glance.loadTexture(gl, "https://echtzeit-computergrafik-ws24.github.io/img/marble-diffuse.webp", { wrap: gl.REPEAT });
+const marbleSpecular = await glance.loadTexture(gl, "https://echtzeit-computergrafik-ws24.github.io/img/marble-specular.webp", { wrap: gl.REPEAT });
 
-const statueGeo = await glance.loadObj("/geo/lucy100k.obj");
+const statueGeo = await glance.loadObj("https://echtzeit-computergrafik-ws24.github.io/geo/lucy100k.obj");
 
 const groundGeo = await glance.createCircularPlane("ground-geo", {
     radius: 3,
@@ -180,12 +180,12 @@ const ground = glance.createDrawCall(gl, "ground",
 
 const skybox = await glance.createSkybox(gl,
     [
-        "/img/envmap-misty-field-px.webp",
-        "/img/envmap-misty-field-nx.webp",
-        "/img/envmap-misty-field-py.webp",
-        "/img/envmap-misty-field-ny.webp",
-        "/img/envmap-misty-field-pz.webp",
-        "/img/envmap-misty-field-nz.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-misty-field-px.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-misty-field-nx.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-misty-field-py.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-misty-field-ny.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-misty-field-pz.webp",
+        "https://echtzeit-computergrafik-ws24.github.io/img/envmap-misty-field-nz.webp",
     ],
 );
 

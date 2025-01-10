@@ -29,7 +29,7 @@
 <script>
     // Simulate a classroom.
     const {
-        gl, onMouseHover, onMouseDown, onMouseDrag, onMouseUp, onMouseWheel, onKeyDown, onKeyUp, onResize, setRenderLoop, Vec3, Vec4, Mat3, Mat4, Quat,
+        gl, onMouseHover, onMouseDown, onMouseDrag, onMouseUp, onMouseWheel, onKeyDown, onKeyUp, onResize, setRenderLoop, Vec3, Vec4, Mat3, Mat4, Quat, Sticky,
     } = (() => {
 
         // WebGL context
@@ -138,14 +138,26 @@
         }
 
         // "Sticky" values are used in the classroom to synchronize the code between
-        // client and server. They are not necessary here and can be replaced by
-        // regular variables instead
-        // The "Cache" variables are meant to minimize recalculations of values that
-        // seldom change, like the view matrix or camera position. They too can be
-        // replaced by regular variables.
+        // client and server. You don't need to use them, in fact they do nothing
+        // that you couldn't do with regular variables. I have just included them
+        // here so that the classroom code is compatible with this page.
+        class _Sticky {
+            constructor(value) { this.value = value; this.callback = null; }
+            set onChange(callback) { this.callback = callback; }
+            get() { return this.value; }
+            getRef() { return this.value; }
+            set(value) { this.value = value; if (this.callback) this.callback(value); }
+            update(func) { this.set(func(this.value)); }
+            // Everything below is just to complete the API. It should not be necessary.
+            addDependent(_) { }
+            removeDependent(_) { }
+            clearDependents() { }
+            setDirty() { }
+        };
+        function Sticky(name, value) { return new _Sticky(value); }
 
         return {
-            gl, onMouseHover, onMouseDown, onMouseDrag, onMouseUp, onMouseWheel, onKeyDown, onKeyUp, onResize, setRenderLoop, Vec3: glance.Vec3, Vec4: glance.Vec4, Mat3: glance.Mat3, Mat4: glance.Mat4, Quat: glance.Quat,
+            gl, onMouseHover, onMouseDown, onMouseDrag, onMouseUp, onMouseWheel, onKeyDown, onKeyUp, onResize, setRenderLoop, Vec3: glance.Vec3, Vec4: glance.Vec4, Mat3: glance.Mat3, Mat4: glance.Mat4, Quat: glance.Quat, Sticky,
         };
     })();
 </script>
